@@ -1,4 +1,4 @@
-import { DEMO_MEDIA } from '../data/sampleData';
+import { DEMO_MEDIA, QUICK_TEST_URLS } from '../data/sampleData';
 
 /**
  * Validates whether a given string is a valid Instagram URL
@@ -43,8 +43,40 @@ export async function fetchInstagramMedia(url) {
   const { type, shortcode } = extractMediaMetadata(cleanUrl);
   const isReelUrl = type === 'reel';
 
+  // Check if this URL is explicitly one of the curated demo chips
+  const isDemoSample = QUICK_TEST_URLS.some(sample => 
+    cleanUrl.toLowerCase().includes(sample.url.toLowerCase().split('?')[0])
+  );
+
+  if (isDemoSample) {
+    if (type === 'carousel') {
+      return {
+        ...DEMO_MEDIA.carousel,
+        title: `Sample Instagram Carousel (${shortcode || 'Demo'})`,
+        sourceUrl: cleanUrl,
+        fetchedAt: new Date().toISOString()
+      };
+    } else if (type === 'photo') {
+      return {
+        ...DEMO_MEDIA.photo,
+        title: `Sample Instagram HD Photo (${shortcode || 'Demo'})`,
+        sourceUrl: cleanUrl,
+        fetchedAt: new Date().toISOString()
+      };
+    } else {
+      return {
+        ...DEMO_MEDIA.reel,
+        title: `Sample Instagram Reel (${shortcode || 'Demo'})`,
+        sourceUrl: cleanUrl,
+        fetchedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  // Real user URL: Must extract actual media from backend API
+  let extractionError = null;
+
   try {
-    // 1. Call server metadata extraction endpoint
     const response = await fetch('/api/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -61,12 +93,12 @@ export async function fetchInstagramMedia(url) {
         const isCarousel = Array.isArray(data.carouselItems) && data.carouselItems.length > 1;
 
         const proxiedVideoUrl = rawVideo
-          ? `/api/proxy-media?url=${encodeURIComponent(rawVideo)}`
-          : DEMO_MEDIA.reel.videoUrl;
+          ? (rawVideo.startsWith('/api/proxy-media') ? rawVideo : `/api/proxy-media?url=${encodeURIComponent(rawVideo)}`)
+          : null;
 
         const proxiedImageUrl = rawImage
-          ? `/api/proxy-media?url=${encodeURIComponent(rawImage)}`
-          : DEMO_MEDIA.reel.posterUrl;
+          ? (rawImage.startsWith('/api/proxy-media') ? rawImage : `/api/proxy-media?url=${encodeURIComponent(rawImage)}`)
+          : null;
 
         const isVideo = isReelUrl || Boolean(data.videoUrl);
         let mediaType = isCarousel ? 'carousel' : (isVideo ? 'reel' : 'photo');
@@ -74,15 +106,15 @@ export async function fetchInstagramMedia(url) {
           .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
 
         const proxiedAvatarUrl = data.avatarUrl
-          ? `/api/proxy-media?url=${encodeURIComponent(data.avatarUrl)}`
-          : DEMO_MEDIA.photo.author.avatar;
+          ? (data.avatarUrl.startsWith('/api/proxy-media') ? data.avatarUrl : `/api/proxy-media?url=${encodeURIComponent(data.avatarUrl)}`)
+          : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
 
-        // Build carousel items — already proxied by backend, use as-is
+        // Build carousel items
         const carouselItems = isCarousel
           ? data.carouselItems.map((item, i) => ({
               id: item.id || i + 1,
               type: item.type || 'photo',
-              url: item.url, // already proxied by backend
+              url: item.url.startsWith('/api/proxy-media') ? item.url : `/api/proxy-media?url=${encodeURIComponent(item.url)}`,
               caption: `Slide ${item.id || i + 1}`
             }))
           : null;
@@ -113,11 +145,14 @@ export async function fetchInstagramMedia(url) {
             posterUrl: carouselItems[0]?.url || proxiedImageUrl,
           };
         } else if (mediaType === 'reel') {
+          if (!proxiedVideoUrl) {
+            throw new Error('No downloadable video stream found for this Reel. It may be private or expired.');
+          }
           return {
             ...baseResult,
             videoUrl: proxiedVideoUrl,
-            posterUrl: proxiedImageUrl,
-            imageUrl: proxiedImageUrl,
+            posterUrl: proxiedImageUrl || '',
+            imageUrl: proxiedImageUrl || '',
             resolutions: [
               { label: '1080p Full HD Video Stream (MP4)', quality: '1080p', size: 'Direct Stream', url: proxiedVideoUrl },
               { label: '720p HD Video Stream (MP4)', quality: '720p', size: 'Direct Stream', url: proxiedVideoUrl },
@@ -134,33 +169,21 @@ export async function fetchInstagramMedia(url) {
             ]
           };
         }
+      } else if (data && data.error) {
+        extractionError = data.error;
       }
+    } else {
+      const errText = await response.text().catch(() => '');
+      extractionError = `Server returned ${response.status}: ${errText || 'Extraction failed'}`;
     }
   } catch (e) {
-    console.warn('Server API extraction error:', e);
+    extractionError = e.message;
   }
 
-  // Fallback stream
-  if (type === 'carousel') {
-    return {
-      ...DEMO_MEDIA.carousel,
-      title: `Instagram Album (${shortcode || 'Carousel'})`,
-      sourceUrl: cleanUrl,
-      fetchedAt: new Date().toISOString()
-    };
-  } else if (type === 'photo') {
-    return {
-      ...DEMO_MEDIA.photo,
-      title: `Instagram HD Photo (${shortcode || 'Post'})`,
-      sourceUrl: cleanUrl,
-      fetchedAt: new Date().toISOString()
-    };
-  } else {
-    return {
-      ...DEMO_MEDIA.reel,
-      title: `Instagram Reel Video (${shortcode || 'Reel'})`,
-      sourceUrl: cleanUrl,
-      fetchedAt: new Date().toISOString()
-    };
-  }
+  // Do NOT return demo media for a real user URL. Report the actual error so user is aware.
+  throw new Error(
+    extractionError
+      ? `Failed to fetch Instagram media: ${extractionError}. Please make sure the post or reel is public and try again.`
+      : 'Unable to extract media from this Instagram link. Please ensure the post/reel is from a public account.'
+  );
 }
