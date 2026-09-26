@@ -1,65 +1,39 @@
 import React from 'react';
-import { Zap, Settings, History, HelpCircle, ShieldCheck } from 'lucide-react';
+import { Zap, History, Shield } from 'lucide-react';
 
-export default function Navbar({ onOpenAdSettings, onOpenLegal, onOpenHistory, historyCount = 0 }) {
+export default function Navbar({ onOpenLegal, onOpenHistory, historyCount = 0 }) {
   return (
     <nav className="navbar">
       <div className="navbar-container">
         <a href="#" className="brand-logo">
           <div className="brand-icon">
-            <Zap size={22} fill="white" />
+            <Zap size={20} fill="white" />
           </div>
-          <span>Insta<span className="gradient-text">Fetch Pro</span></span>
+          <span className="brand-name">Insta<span className="gradient-text">Fetch</span></span>
         </a>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <ul className="nav-links">
-            <li>
-              <button 
-                onClick={onOpenHistory} 
-                className="nav-link btn-secondary" 
-                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
-              >
-                <History size={16} />
-                <span>History</span>
-                {historyCount > 0 && (
-                  <span style={{ 
-                    background: '#e1306c', 
-                    color: 'white', 
-                    borderRadius: '50%', 
-                    padding: '2px 6px', 
-                    fontSize: '0.7rem' 
-                  }}>
-                    {historyCount}
-                  </span>
-                )}
-              </button>
-            </li>
-
-            <li>
-              <button 
-                onClick={() => onOpenLegal('privacy')} 
-                className="nav-link" 
-                style={{ background: 'none', border: 'none', font: 'inherit' }}
-              >
-                AdSense Legal
-              </button>
-            </li>
-          </ul>
-
-          <div className="badge-live-ads" title="AdSense Integration Active">
-            <ShieldCheck size={14} />
-            <span>AdSense Ready</span>
-          </div>
+        <div className="navbar-actions">
+          <button 
+            onClick={onOpenHistory} 
+            className="nav-action-btn btn-secondary" 
+            title="View download history"
+          >
+            <History size={16} />
+            <span className="action-btn-text">History</span>
+            {historyCount > 0 && (
+              <span className="history-badge">
+                {historyCount}
+              </span>
+            )}
+          </button>
 
           <button 
-            onClick={onOpenAdSettings}
-            className="btn-secondary"
-            style={{ padding: '0.5rem 0.9rem', fontSize: '0.85rem' }}
-            title="Configure Google AdSense Publisher ID"
+            onClick={() => onOpenLegal('privacy')} 
+            className="nav-action-btn nav-link-text" 
+            title="Privacy & Terms"
           >
-            <Settings size={16} />
-            <span style={{ display: 'none', smDisplay: 'inline' }}>AdSense Settings</span>
+            <Shield size={15} />
+            <span className="action-btn-text">Legal</span>
           </button>
         </div>
       </div>

@@ -65,44 +65,46 @@ export default function HeroSection({ onFetchMedia, isLoading, error }) {
 
       <form onSubmit={handleSubmit} className="downloader-box">
         <div className="input-group">
-          <Link2 className="input-icon" size={22} />
-          <input
-            type="url"
-            className="url-input"
-            placeholder="Paste Instagram link here (e.g. https://www.instagram.com/reel/...)"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onPaste={handlePaste}
-            required
-          />
+          <div className="input-field-wrapper">
+            <Link2 className="input-icon" size={20} />
+            <input
+              type="url"
+              className="url-input"
+              placeholder="Paste Instagram link (Reel, Photo, Audio)..."
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onPaste={handlePaste}
+              required
+            />
 
-          {url && (
+            {url && (
+              <button
+                type="button"
+                className="quick-clear-btn"
+                onClick={handleClearUrl}
+                title="Clear URL"
+                aria-label="Clear URL"
+              >
+                <X size={16} />
+              </button>
+            )}
+
             <button
               type="button"
-              className="quick-clear-btn"
-              onClick={handleClearUrl}
-              title="Clear pasted URL"
+              className="quick-paste-btn"
+              onClick={handlePasteClipboard}
+              title="Paste from clipboard"
+              aria-label="Paste from clipboard"
             >
-              <X size={16} />
-              <span className="clear-text">Clear</span>
+              <Clipboard size={15} />
+              <span className="btn-label-text">Paste</span>
             </button>
-          )}
-
-          <button
-            type="button"
-            className="quick-paste-btn"
-            onClick={handlePasteClipboard}
-            title="Paste from clipboard"
-          >
-            <Clipboard size={15} />
-            <span>Paste</span>
-          </button>
+          </div>
 
           <button
             type="submit"
-            className="btn-ig-primary"
+            className="btn-ig-primary fetch-submit-btn"
             disabled={isLoading}
-            style={{ minWidth: '140px' }}
           >
             {isLoading ? (
               <>
@@ -119,7 +121,7 @@ export default function HeroSection({ onFetchMedia, isLoading, error }) {
         </div>
 
         {error && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: '#ef4444', marginTop: '0.85rem', fontSize: '0.9rem', background: 'rgba(239, 68, 68, 0.1)', padding: '0.6rem 1rem', borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+          <div className="error-banner">
             <AlertCircle size={16} />
             <span>{error}</span>
           </div>

@@ -3,9 +3,6 @@ import Navbar from './components/Navbar';
 import HeroSection from './components/HeroSection';
 import MediaPreviewer from './components/MediaPreviewer';
 import DownloadCountdown from './components/DownloadCountdown';
-import AdSlot from './components/AdSlot';
-import AdBlockNotice from './components/AdBlockNotice';
-import AdSenseConfigModal from './components/AdSenseConfigModal';
 import FeatureGrid from './components/FeatureGrid';
 import RecentHistory from './components/RecentHistory';
 import HowToSection from './components/HowToSection';
@@ -13,23 +10,18 @@ import LegalModal from './components/LegalModal';
 import Footer from './components/Footer';
 
 import { fetchInstagramMedia } from './services/instagramParser';
-import { getStoredAdSenseConfig, saveAdSenseConfig, injectAdSenseScript, detectAdBlocker } from './services/adsenseManager';
 import { downloadMediaFile, getDownloadHistory, addToDownloadHistory, clearDownloadHistory } from './services/downloadService';
 
 export default function App() {
-  const [adsenseConfig, setAdsenseConfig] = useState(getStoredAdSenseConfig());
   const [activeMedia, setActiveMedia] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const [downloadTask, setDownloadTask] = useState(null);
-  const [activeModal, setActiveModal] = useState(null); // 'adsense', 'history', 'legal'
+  const [activeModal, setActiveModal] = useState(null); // 'history', 'legal'
   const [legalDocKey, setLegalDocKey] = useState('privacy');
 
   const [downloadHistory, setDownloadHistory] = useState(getDownloadHistory());
-  const [isAdBlockDetected, setIsAdBlockDetected] = useState(false);
-  const [showStickyAd, setShowStickyAd] = useState(true);
-
   const mediaPreviewRef = useRef(null);
 
   // Auto-scroll to media preview card whenever new media is fetched
@@ -43,14 +35,6 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [activeMedia]);
-
-  // Initialize AdSense scripts and AdBlock detector on mount
-  useEffect(() => {
-    if (adsenseConfig.enabled && !adsenseConfig.isDemoMode) {
-      injectAdSenseScript(adsenseConfig.publisherId);
-    }
-    detectAdBlocker().then((blocked) => setIsAdBlockDetected(blocked));
-  }, [adsenseConfig]);
 
   const handleFetchMedia = async (url) => {
     setIsLoading(true);
@@ -81,16 +65,10 @@ export default function App() {
     setDownloadTask(null);
   };
 
-  const handleSaveAdConfig = (newConfig) => {
-    setAdsenseConfig(newConfig);
-    saveAdSenseConfig(newConfig);
-  };
-
   return (
     <div className="app-layout" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Header Navigation */}
       <Navbar
-        onOpenAdSettings={() => setActiveModal('adsense')}
         onOpenLegal={(docKey) => {
           setLegalDocKey(docKey);
           setActiveModal('legal');
@@ -101,13 +79,6 @@ export default function App() {
 
       {/* Main Content Area */}
       <main style={{ flex: 1 }}>
-        {/* AdBlocker Warning if active */}
-        {isAdBlockDetected && (
-          <div style={{ padding: '1rem 1.5rem 0' }}>
-            <AdBlockNotice onClose={() => setIsAdBlockDetected(false)} />
-          </div>
-        )}
-
         {/* Hero Section */}
         <HeroSection
           onFetchMedia={handleFetchMedia}
@@ -115,25 +86,13 @@ export default function App() {
           error={error}
         />
 
-        {/* Top Header Leaderboard Ad Slot (728x90) */}
-        <div style={{ padding: '0 1rem' }}>
-          <AdSlot type="leaderboard" adsenseConfig={adsenseConfig} label="Header Leaderboard Ad" />
-        </div>
-
         {/* Media Preview Card */}
         {activeMedia && (
-          <div ref={mediaPreviewRef} style={{ scrollMarginTop: '90px' }}>
+          <div ref={mediaPreviewRef} style={{ scrollMarginTop: '80px' }}>
             <MediaPreviewer
               media={activeMedia}
               onStartDownload={handleStartDownload}
             />
-          </div>
-        )}
-
-        {/* In-Feed Banner Ad Slot (300x250) */}
-        {activeMedia && (
-          <div style={{ padding: '0 1rem' }}>
-            <AdSlot type="box" adsenseConfig={adsenseConfig} label="In-Feed Sponsor Ad" />
           </div>
         )}
 
@@ -150,38 +109,14 @@ export default function App() {
           setLegalDocKey(docKey);
           setActiveModal('legal');
         }}
-        onOpenAdSettings={() => setActiveModal('adsense')}
       />
-
-      {/* Sticky Mobile/Desktop Footer Anchor Ad */}
-      {adsenseConfig.enabled && showStickyAd && (
-        <div className="sticky-ad-banner">
-          <AdSlot type="sticky" adsenseConfig={adsenseConfig} label="Sticky Anchor Ad" />
-          <button
-            className="close-sticky-btn"
-            onClick={() => setShowStickyAd(false)}
-            title="Close Ad"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Modals */}
       {downloadTask && (
         <DownloadCountdown
           downloadTask={downloadTask}
-          adsenseConfig={adsenseConfig}
           onClose={() => setDownloadTask(null)}
           onConfirmDownload={handleConfirmDownload}
-        />
-      )}
-
-      {activeModal === 'adsense' && (
-        <AdSenseConfigModal
-          config={adsenseConfig}
-          onSave={handleSaveAdConfig}
-          onClose={() => setActiveModal(null)}
         />
       )}
 

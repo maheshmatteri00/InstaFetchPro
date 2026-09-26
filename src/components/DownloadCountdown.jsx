@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Loader2, X, CheckCircle, Shield, Sparkles } from 'lucide-react';
-import AdSlot from './AdSlot';
+import { Download, X, CheckCircle, Shield, Sparkles, Zap } from 'lucide-react';
 
-export default function DownloadCountdown({ downloadTask, adsenseConfig, onClose, onConfirmDownload }) {
-  const [secondsLeft, setSecondsLeft] = useState(3);
+export default function DownloadCountdown({ downloadTask, onClose, onConfirmDownload }) {
+  const [secondsLeft, setSecondsLeft] = useState(2);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -19,59 +18,65 @@ export default function DownloadCountdown({ downloadTask, adsenseConfig, onClose
 
   return (
     <div className="modal-overlay">
-      <div className="glass-card modal-content glow-animation" style={{ padding: '2rem', textAlign: 'center' }}>
-        <div className="modal-header" style={{ marginBottom: '1rem' }}>
+      <div className="glass-card modal-content countdown-modal glow-animation">
+        <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontWeight: 700 }}>
             <Sparkles size={18} color="#e1306c" />
-            <span>High-Speed Download Link</span>
+            <span>High-Speed Download</span>
           </div>
-          <button onClick={onClose} className="close-modal-btn">
+          <button onClick={onClose} className="close-modal-btn" aria-label="Close dialog">
             <X size={18} />
           </button>
         </div>
 
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
-          Preparing HD media file stream: <strong style={{ color: 'white' }}>{downloadTask?.fileName}</strong>
+        <p className="countdown-filename">
+          File: <strong>{downloadTask?.fileName}</strong>
         </p>
 
-        {/* High-eCPM Interstitial Ad Unit Box */}
-        <div style={{ margin: '1rem 0' }}>
-          <AdSlot type="countdown" adsenseConfig={adsenseConfig} label="Sponsored Ad" />
+        {/* Security & Verification Card */}
+        <div className="security-notice-card">
+          <div className="security-item">
+            <Zap size={16} color="#fcb045" />
+            <span>Direct CDN stream ready</span>
+          </div>
+          <div className="security-item">
+            <Shield size={16} color="#10b981" />
+            <span>Verified 1080p Ultra HD Quality</span>
+          </div>
         </div>
 
         {/* Countdown Progress Circle / Action */}
-        <div style={{ margin: '1.5rem 0' }}>
+        <div style={{ margin: '1.25rem 0' }}>
           {!isReady ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-              <div style={{ position: 'relative', width: '60px', height: '60px', display: 'flex', alignItems: 'center', justifyCenter: 'center', background: 'rgba(253, 29, 29, 0.1)', borderRadius: '50%', border: '2px solid var(--ig-red)', color: 'white', fontSize: '1.4rem', fontWeight: 800 }}>
-                <span style={{ margin: 'auto' }}>{secondsLeft}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem' }}>
+              <div className="countdown-timer-circle">
+                <span>{secondsLeft}</span>
               </div>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Unlocking HD download link in {secondsLeft} seconds...
+                Preparing direct download link...
               </span>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#10b981', fontWeight: 600 }}>
-                <CheckCircle size={20} />
-                <span>Link Secured & Scanned Clean</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#10b981', fontWeight: 600, fontSize: '0.9rem' }}>
+                <CheckCircle size={18} />
+                <span>Link Verified & Ready</span>
               </div>
 
               <button
                 onClick={onConfirmDownload}
-                className="btn-ig-primary"
-                style={{ width: '100%', padding: '1rem', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 10px 25px rgba(16, 185, 129, 0.4)' }}
+                className="btn-ig-primary download-now-btn"
               >
-                <Download size={22} />
-                <span>Click to Start Download</span>
+                <Download size={20} />
+                <span>Click to Save File</span>
               </button>
             </div>
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '1rem' }}>
-          <Shield size={12} />
-          <span>256-Bit SSL Encrypted Direct Download • No Popups</span>
+        <div className="countdown-footer-note">
+          <Shield size={13} />
+          <span>Clean Direct Download • No Ads/Redirects</span>
         </div>
       </div>
     </div>

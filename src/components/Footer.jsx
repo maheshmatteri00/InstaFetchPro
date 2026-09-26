@@ -1,7 +1,7 @@
 import React from 'react';
 import { Zap, Heart, Shield } from 'lucide-react';
 
-export default function Footer({ onOpenLegal, onOpenAdSettings }) {
+export default function Footer({ onOpenLegal }) {
   return (
     <footer>
       <div className="footer-container">
@@ -21,35 +21,30 @@ export default function Footer({ onOpenLegal, onOpenAdSettings }) {
 
         <div>
           <h4 style={{ color: 'var(--text-primary)', marginBottom: '0.85rem', fontSize: '0.95rem' }}>
-            AdSense Legal & Compliance
+            Legal & Compliance
           </h4>
           <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             <li>
-              <button onClick={() => onOpenLegal('privacy')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+              <button onClick={() => onOpenLegal('privacy')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: '4px 0' }}>
                 Privacy Policy
               </button>
             </li>
             <li>
-              <button onClick={() => onOpenLegal('terms')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+              <button onClick={() => onOpenLegal('terms')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: '4px 0' }}>
                 Terms of Service
               </button>
             </li>
             <li>
-              <button onClick={() => onOpenLegal('dmca')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>
+              <button onClick={() => onOpenLegal('dmca')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', textAlign: 'left', padding: '4px 0' }}>
                 DMCA & Copyright Disclaimer
-              </button>
-            </li>
-            <li>
-              <button onClick={onOpenAdSettings} style={{ background: 'none', border: 'none', color: '#fcb045', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                <Shield size={12} /> Configure Publisher ID
               </button>
             </li>
           </ul>
         </div>
       </div>
 
-      <div style={{ textAlign: 'center', marginTop: '3rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-glass)', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-        <p>© 2026 InstaFetch Pro. All rights reserved. Google AdSense Ready Downloader Engine.</p>
+      <div style={{ textAlign: 'center', marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-glass)', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+        <p>© 2026 InstaFetch Pro. All rights reserved. Free, Fast & Secure Instagram Downloader.</p>
       </div>
     </footer>
   );
