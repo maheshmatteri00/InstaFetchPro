@@ -242,7 +242,7 @@ export async function extractInstagramMedia(url) {
           if (media) {
             if (media.user?.username) authorName = media.user.username;
             const cap = media.caption?.text || media.edge_media_to_caption?.edges?.[0]?.node?.text || '';
-            if (cap) title = cap.substring(0, 150);
+            if (cap) title = cap.substring(0, 220);
             if (media.user?.profile_pic_url) avatarUrl = media.user.profile_pic_url;
 
             const isSidecar = media.media_type === 8
@@ -400,7 +400,7 @@ export async function extractInstagramMedia(url) {
       if (title.startsWith('Instagram Post (')) {
         const captionMatch = unescaped.match(/"caption"\s*:\s*\{"text"\s*:\s*"([^"]+)"/i) || unescaped.match(/<title>([^<]+)<\/title>/i);
         if (captionMatch && captionMatch[1]) {
-          title = decodeUnicodeEscapes(captionMatch[1].replace(/\\n/g, ' ').substring(0, 150));
+          title = decodeUnicodeEscapes(captionMatch[1].replace(/\n/g, ' ').replace(/\\n/g, ' ').substring(0, 220));
         }
       }
     }

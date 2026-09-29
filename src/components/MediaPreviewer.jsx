@@ -150,7 +150,32 @@ export default function MediaPreviewer({ media, onStartDownload }) {
         <div>
           {/* Author Header */}
           <div className="author-bar">
-            <img src={media.author.avatar} alt={media.author.name} className="author-avatar" />
+            {media.author.avatar ? (
+              <img
+                src={media.author.avatar}
+                alt={media.author.name}
+                className="author-avatar"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
+              />
+            ) : null}
+            <div
+              className="author-avatar"
+              style={{
+                display: media.author.avatar ? 'none' : 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'linear-gradient(135deg, #e1306c, #fd1d1d)',
+                color: 'white',
+                fontWeight: 700,
+                fontSize: '1.1rem',
+                flexShrink: 0
+              }}
+            >
+              {(media.author.username || media.author.name || '?')[0].toUpperCase()}
+            </div>
             <div className="author-info">
               <h4>
                 {media.author.name}
@@ -160,7 +185,17 @@ export default function MediaPreviewer({ media, onStartDownload }) {
             </div>
           </div>
 
-          <h3 style={{ fontSize: '1.2rem', marginBottom: '0.75rem', lineHeight: '1.3' }}>
+          <h3 style={{
+            fontSize: '1rem',
+            marginBottom: '0.75rem',
+            lineHeight: '1.45',
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            wordBreak: 'break-word',
+            color: 'var(--text-primary)'
+          }}>
             {media.title}
           </h3>
 

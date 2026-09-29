@@ -100,14 +100,20 @@ export async function fetchInstagramMedia(url) {
           ? (rawImage.startsWith('/api/proxy-media') ? rawImage : `/api/proxy-media?url=${encodeURIComponent(rawImage)}`)
           : null;
 
-        const isVideo = isReelUrl || Boolean(data.videoUrl);
+        // Reel = URL is /reel/ type AND has a video. /p/ posts can have video but are not reels.
+        const hasVideo = Boolean(data.videoUrl);
+        const isVideo = isReelUrl && hasVideo;
+        // If it's a /p/ post with a video, treat as 'photo' type (show image, not broken reel player)
+        // unless the reel URL flag is set
         let mediaType = isCarousel ? 'carousel' : (isVideo ? 'reel' : 'photo');
-        const cleanTitle = (data.title || `Instagram ${mediaType === 'reel' ? 'Reel' : mediaType === 'carousel' ? 'Carousel' : 'Post'} (${shortcode || 'Live'})`)
-          .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+        const rawTitle = data.title || `Instagram ${mediaType === 'reel' ? 'Reel' : mediaType === 'carousel' ? 'Carousel' : 'Post'} (${shortcode || 'Live'})`;
+        const cleanTitle = rawTitle
+          .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+          .substring(0, 220);
 
         const proxiedAvatarUrl = data.avatarUrl
           ? (data.avatarUrl.startsWith('/api/proxy-media') ? data.avatarUrl : `/api/proxy-media?url=${encodeURIComponent(data.avatarUrl)}`)
-          : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+          : null;
 
         // Build carousel items
         const carouselItems = isCarousel
