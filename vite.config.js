@@ -51,12 +51,16 @@ function instagramApiPlugin() {
             return;
           }
 
+          // Determine if this is a video or image request so we send correct Sec-Fetch-Dest.
+          // Instagram CDN rejects profile pic / thumbnail requests that claim to be video fetches.
+          const isVideoUrl = /\.mp4/i.test(targetUrl) || targetUrl.includes('video');
           const headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Accept': '*/*',
+            'Accept': isVideoUrl ? 'video/webm,video/mp4,video/*;q=0.9,*/*;q=0.8' : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
             'Referer': 'https://www.instagram.com/',
-            'Sec-Fetch-Dest': 'video',
-            'Sec-Fetch-Mode': 'cors'
+            'Sec-Fetch-Dest': isVideoUrl ? 'video' : 'image',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site'
           };
 
           if (req.headers.range) {

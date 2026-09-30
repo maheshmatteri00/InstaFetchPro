@@ -100,12 +100,11 @@ export async function fetchInstagramMedia(url) {
           ? (rawImage.startsWith('/api/proxy-media') ? rawImage : `/api/proxy-media?url=${encodeURIComponent(rawImage)}`)
           : null;
 
-        // Reel = URL is /reel/ type AND has a video. /p/ posts can have video but are not reels.
+        // Reel = URL is /reel/ type. /p/ posts can have video but are not reels.
+        // Always classify reel URLs as 'reel' — even if videoUrl is null (missing video triggers
+        // a clear error downstream rather than silently falling back to showing a thumbnail image).
         const hasVideo = Boolean(data.videoUrl);
-        const isVideo = isReelUrl && hasVideo;
-        // If it's a /p/ post with a video, treat as 'photo' type (show image, not broken reel player)
-        // unless the reel URL flag is set
-        let mediaType = isCarousel ? 'carousel' : (isVideo ? 'reel' : 'photo');
+        let mediaType = isCarousel ? 'carousel' : (isReelUrl ? 'reel' : 'photo');
         const rawTitle = data.title || `Instagram ${mediaType === 'reel' ? 'Reel' : mediaType === 'carousel' ? 'Carousel' : 'Post'} (${shortcode || 'Live'})`;
         const cleanTitle = rawTitle
           .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
@@ -138,7 +137,7 @@ export async function fetchInstagramMedia(url) {
           metrics: {
             likes: 'Live',
             comments: 'Active',
-            views: isVideo ? 'HD Stream' : undefined
+            views: (mediaType === 'reel' && hasVideo) ? 'HD Stream' : undefined
           },
           fetchedAt: new Date().toISOString()
         };
