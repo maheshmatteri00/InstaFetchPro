@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Core Instagram media extraction and proxy logic.
  * Used by Cloudflare Workers, Cloudflare Pages functions, and Vite dev server.
  */
@@ -18,7 +18,7 @@ export function sanitizeCdnUrl(url) {
     .split("'")[0]
     .trim();
   cleaned = cleaned.replace(/\/c\d+\.\d+\.\d+\.\d+a\//gi, '/');
-  return cleaned;
+  return cleaned || null;
 }
 
 export function decodeUnicodeEscapes(str) {
@@ -155,18 +155,67 @@ export function extractCarouselFromEmbed(html) {
   return urls;
 }
 
+// Internal helpers
+
+function unescapeInstagramHtml(html) {
+  return html
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, c) => String.fromCharCode(parseInt(c, 16)))
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/g, '&')
+    .replace(/&amp;/g, '&');
+}
+
+function extractAllVideoUrls(html) {
+  const found = [];
+  const text = unescapeInstagramHtml(html);
+
+  const patterns = [
+    /"video_url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"videoUrl"\s*:\s*"(https?:[^"]+)"/gi,
+    /"playback_url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"stream_url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"browser_native_hd_url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"browser_native_sd_url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"(https?:[^"]+)"/gi,
+    /"src"\s*:\s*"(https?:[^"]+\.mp4[^"]*?)"/gi,
+    /videoSrc\s*[=:]\s*["'`](https?:[^"'`]+\.mp4[^"'`]*?)["'`]/gi,
+    /video_url\s*=\s*["'](https?:[^"']+)["']/gi,
+    /<video[^>]+src=["'](https?:[^"']+)["']/gi,
+    /<source[^>]+src=["'](https?:[^"']+\.mp4[^"']*?)["']/gi,
+    /(https?:\/\/[^\s"'<]+?(?:fbcdn\.net|cdninstagram\.com)[^\s"'<]+?\.mp4[^\s"'<]*)/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      const candidate = sanitizeCdnUrl(m[1]);
+      if (candidate && candidate.length > 30 && !found.includes(candidate)) {
+        found.push(candidate);
+      }
+    }
+  }
+  return found;
+}
+
+function pickBestVideoUrl(candidates) {
+  const cdnMp4 = candidates.find(u =>
+    (u.includes('fbcdn') || u.includes('cdninstagram')) &&
+    u.toLowerCase().includes('.mp4') &&
+    !u.includes('manifest') &&
+    !u.includes('dash')
+  );
+  return cdnMp4 || candidates[0] || null;
+}
+
 /**
- * Main extraction function that works in Workers, Node, and Pages Functions
+ * Main extraction function - works in Cloudflare Workers, Pages Functions, and Vite dev.
  */
 export async function extractInstagramMedia(url) {
   if (!url) throw new Error('URL is required');
 
   const match = url.match(/(?:p|reel|reels|tv|stories)\/([A-Za-z0-9_-]+)/i);
   const shortcode = match ? match[1] : null;
-
-  if (!shortcode) {
-    throw new Error('Invalid Instagram shortcode');
-  }
+  if (!shortcode) throw new Error('Invalid Instagram shortcode');
 
   let videoUrl = null;
   let imageUrl = null;
@@ -174,310 +223,260 @@ export async function extractInstagramMedia(url) {
   let authorName = 'instagram_creator';
   let title = `Instagram Post (${shortcode})`;
   let carouselItems = [];
+  const debugLog = [];
 
   const isPost = url.includes('/p/');
   const targetPageUrl = isPost
     ? `https://www.instagram.com/p/${shortcode}/`
     : `https://www.instagram.com/reel/${shortcode}/`;
 
-  // Step A: oEmbed API
-  try {
-    const oembedUrl = `https://www.instagram.com/oembed/?url=${encodeURIComponent(targetPageUrl)}`;
-    const oembedRes = await fetch(oembedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  // STEP 1: Embed page (PRIMARY - works without login)
+  const embedUrls = isPost
+    ? [
+        `https://www.instagram.com/p/${shortcode}/embed/captioned/`,
+        `https://www.instagram.com/p/${shortcode}/embed/`,
+      ]
+    : [
+        `https://www.instagram.com/reel/${shortcode}/embed/captioned/`,
+        `https://www.instagram.com/reel/${shortcode}/embed/`,
+        `https://www.instagram.com/reel/${shortcode}/embed/v2/`,
+      ];
+
+  for (const embedUrl of embedUrls) {
+    if (videoUrl && imageUrl) break;
+    try {
+      const embedRes = await fetch(embedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.instagram.com/',
+          'Sec-Fetch-Dest': 'iframe',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'same-origin',
+        }
+      });
+      debugLog.push(`embed:${embedRes.status}:${embedUrl.split('/').slice(-3).join('/')}`);
+
+      if (embedRes.ok) {
+        const html = await embedRes.text();
+        const unescaped = unescapeInstagramHtml(html);
+
+        if (!videoUrl) {
+          const vids = extractAllVideoUrls(unescaped);
+          if (vids.length > 0) {
+            videoUrl = pickBestVideoUrl(vids);
+            debugLog.push(`embed-video:${videoUrl ? 'found' : 'none'}`);
+          }
+        }
+
+        if (!imageUrl) {
+          imageUrl = extractFullResImageFromJson(unescaped) || extractPostImage(unescaped);
+          if (!imageUrl) {
+            const imgTag = unescaped.match(/<img[^>]+src=["'](https?:[^"']+(?:cdninstagram|fbcdn)[^"']+)["']/i);
+            if (imgTag) imageUrl = sanitizeCdnUrl(imgTag[1]);
+          }
+        }
+
+        if (authorName === 'instagram_creator') {
+          const am = unescaped.match(/"username"\s*:\s*"([^"]{2,30})"/i)
+            || unescaped.match(/@([A-Za-z0-9._]{2,30})/);
+          if (am && am[1]) authorName = am[1].trim();
+        }
+
+        if (title.startsWith('Instagram Post (')) {
+          const tm = unescaped.match(/"caption"\s*:\s*\{"text"\s*:\s*"([^"]{3,})"/i)
+            || unescaped.match(/<title>([^<]{5,})<\/title>/i);
+          if (tm && tm[1]) title = decodeUnicodeEscapes(tm[1].replace(/\n/g, ' ').substring(0, 220));
+        }
+
+        if (!avatarUrl) avatarUrl = extractAuthorAvatar(unescaped);
+
+        if (!carouselItems.length) {
+          const extracted = extractCarouselFromEmbed(unescaped);
+          if (extracted.length > 1) {
+            carouselItems = extracted.map((u, i) => ({
+              id: i + 1, type: 'photo',
+              url: `/api/proxy-media?url=${encodeURIComponent(u)}`
+            }));
+          }
+        }
       }
-    });
-    if (oembedRes.ok) {
-      const oembedData = await oembedRes.json();
-      if (oembedData && oembedData.author_name) {
-        authorName = oembedData.author_name;
-      }
-      if (oembedData && oembedData.title) {
-        title = decodeUnicodeEscapes(oembedData.title);
-      }
+    } catch (e) {
+      debugLog.push(`embed-err:${e.message.substring(0, 60)}`);
     }
-  } catch (e) {
-    console.warn('oEmbed fetch fallback:', e);
   }
 
-  // Step B: /media/?size=l redirect for photos
-  if (isPost) {
+  // STEP 2: oEmbed (author/title fallback)
+  if (authorName === 'instagram_creator' || title.startsWith('Instagram Post (')) {
     try {
-      const mediaRedirectUrl = `https://www.instagram.com/p/${shortcode}/media/?size=l`;
-      const mediaRes = await fetch(mediaRedirectUrl, {
+      const oembedRes = await fetch(
+        `https://www.instagram.com/oembed/?url=${encodeURIComponent(targetPageUrl)}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } }
+      );
+      debugLog.push(`oembed:${oembedRes.status}`);
+      if (oembedRes.ok) {
+        const od = await oembedRes.json();
+        if (od && od.author_name && authorName === 'instagram_creator') authorName = od.author_name;
+        if (od && od.title && title.startsWith('Instagram Post (')) title = decodeUnicodeEscapes(od.title);
+      }
+    } catch (e) {
+      debugLog.push(`oembed-err:${e.message.substring(0, 40)}`);
+    }
+  }
+
+  // STEP 3: /media/?size=l (photo redirect - posts only)
+  if (isPost && !imageUrl) {
+    try {
+      const mediaRes = await fetch(`https://www.instagram.com/p/${shortcode}/media/?size=l`, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
           'Referer': 'https://www.instagram.com/',
         },
         redirect: 'follow'
       });
-      if (mediaRes.ok && mediaRes.headers.get('content-type')?.startsWith('image/')) {
-        imageUrl = mediaRes.url || mediaRedirectUrl;
+      debugLog.push(`media-size-l:${mediaRes.status}`);
+      if (mediaRes.ok && mediaRes.headers.get('content-type') && mediaRes.headers.get('content-type').startsWith('image/')) {
+        imageUrl = mediaRes.url;
       }
     } catch (e) {
-      console.warn('media/?size=l fetch error:', e.message);
+      debugLog.push(`media-size-l-err:${e.message.substring(0, 40)}`);
     }
   }
 
-  // Step B.5: Instagram internal JSON API (?__a=1) - works for both /p/ and /reel/ URLs
-  if (!carouselItems.length) {
+  // STEP 4: Internal JSON API (?__a=1)
+  if (!videoUrl && !carouselItems.length) {
     try {
-      const jsonApiUrl = `${targetPageUrl}?__a=1&__d=dis`;
-      const jsonApiRes = await fetch(jsonApiUrl, {
+      const jsonApiRes = await fetch(`${targetPageUrl}?__a=1&__d=dis`, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
           'Accept': 'application/json, text/plain, */*',
           'X-IG-App-ID': '936619743392459',
           'X-Requested-With': 'XMLHttpRequest',
           'Referer': 'https://www.instagram.com/',
-          'Accept-Language': 'en-US,en;q=0.9'
+          'Accept-Language': 'en-US,en;q=0.9',
         }
       });
-      if (jsonApiRes.ok) {
-        const ct = jsonApiRes.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          const jsonData = await jsonApiRes.json();
-          const media = jsonData?.items?.[0] || jsonData?.graphql?.shortcode_media;
-          if (media) {
-            if (media.user?.username) authorName = media.user.username;
-            const cap = media.caption?.text || media.edge_media_to_caption?.edges?.[0]?.node?.text || '';
-            if (cap) title = cap.substring(0, 220);
-            if (media.user?.profile_pic_url) avatarUrl = media.user.profile_pic_url;
+      debugLog.push(`__a=1:${jsonApiRes.status}`);
+      if (jsonApiRes.ok && (jsonApiRes.headers.get('content-type') || '').includes('application/json')) {
+        const jsonData = await jsonApiRes.json();
+        const media = (jsonData && jsonData.items && jsonData.items[0]) || (jsonData && jsonData.graphql && jsonData.graphql.shortcode_media);
+        if (media) {
+          if (media.user && media.user.username && authorName === 'instagram_creator') authorName = media.user.username;
+          const cap = (media.caption && media.caption.text) || (media.edge_media_to_caption && media.edge_media_to_caption.edges && media.edge_media_to_caption.edges[0] && media.edge_media_to_caption.edges[0].node && media.edge_media_to_caption.edges[0].node.text) || '';
+          if (cap && title.startsWith('Instagram Post (')) title = cap.substring(0, 220);
+          if (media.user && media.user.profile_pic_url && !avatarUrl) avatarUrl = media.user.profile_pic_url;
 
-            const isSidecar = media.media_type === 8
-              || media.__typename === 'GraphSidecar'
-              || media.carousel_media
-              || media.edge_sidecar_to_children;
-
-            if (isSidecar) {
-              const slides = media.carousel_media || media.edge_sidecar_to_children?.edges?.map(e => e.node) || [];
-              for (const slide of slides) {
-                let itemUrl = null;
-                let itemType = 'photo';
-                if (slide.video_versions?.length > 0) {
-                  itemUrl = slide.video_versions[0].url;
-                  itemType = 'video';
-                } else if (slide.video_url) {
-                  itemUrl = slide.video_url;
-                  itemType = 'video';
-                }
-                if (!itemUrl) {
-                  const candidates = slide.image_versions2?.candidates || [];
-                  if (candidates.length > 0) {
-                    candidates.sort((a, b) => (b.width || 0) - (a.width || 0));
-                    itemUrl = candidates[0].url;
-                  }
-                }
-                if (!itemUrl && slide.display_url) itemUrl = slide.display_url;
-                if (itemUrl) {
-                  const clean = sanitizeCdnUrl(itemUrl);
-                  if (clean) {
-                    carouselItems.push({
-                      id: carouselItems.length + 1,
-                      type: itemType,
-                      url: `/api/proxy-media?url=${encodeURIComponent(clean)}`
-                    });
-                  }
-                }
+          const isSidecar = media.media_type === 8 || media.__typename === 'GraphSidecar' || media.carousel_media || media.edge_sidecar_to_children;
+          if (isSidecar) {
+            const slides = media.carousel_media || (media.edge_sidecar_to_children && media.edge_sidecar_to_children.edges && media.edge_sidecar_to_children.edges.map(function(e) { return e.node; })) || [];
+            for (const slide of slides) {
+              let itemUrl = null, itemType = 'photo';
+              if (slide.video_versions && slide.video_versions.length > 0) { itemUrl = slide.video_versions[0].url; itemType = 'video'; }
+              else if (slide.video_url) { itemUrl = slide.video_url; itemType = 'video'; }
+              if (!itemUrl) {
+                const cands = (slide.image_versions2 && slide.image_versions2.candidates) || [];
+                if (cands.length > 0) { cands.sort(function(a, b) { return (b.width || 0) - (a.width || 0); }); itemUrl = cands[0].url; }
               }
-            } else {
-              if (!imageUrl) {
-                const candidates = media.image_versions2?.candidates || [];
-                if (candidates.length > 0) {
-                  candidates.sort((a, b) => (b.width || 0) - (a.width || 0));
-                  imageUrl = sanitizeCdnUrl(candidates[0].url);
-                } else if (media.display_url) {
-                  imageUrl = sanitizeCdnUrl(media.display_url);
-                }
-              }
-              if (!videoUrl && media.video_versions?.length > 0) {
-                videoUrl = sanitizeCdnUrl(media.video_versions[0].url);
-              } else if (!videoUrl && media.video_url) {
-                videoUrl = sanitizeCdnUrl(media.video_url);
+              if (!itemUrl && slide.display_url) itemUrl = slide.display_url;
+              if (itemUrl) {
+                const clean = sanitizeCdnUrl(itemUrl);
+                if (clean) carouselItems.push({ id: carouselItems.length + 1, type: itemType, url: `/api/proxy-media?url=${encodeURIComponent(clean)}` });
               }
             }
+            debugLog.push(`__a=1-carousel:${carouselItems.length}`);
+          } else {
+            if (!imageUrl) {
+              const cands = (media.image_versions2 && media.image_versions2.candidates) || [];
+              if (cands.length > 0) { cands.sort(function(a, b) { return (b.width || 0) - (a.width || 0); }); imageUrl = sanitizeCdnUrl(cands[0].url); }
+              else if (media.display_url) imageUrl = sanitizeCdnUrl(media.display_url);
+            }
+            if (!videoUrl && media.video_versions && media.video_versions.length > 0) videoUrl = sanitizeCdnUrl(media.video_versions[0].url);
+            else if (!videoUrl && media.video_url) videoUrl = sanitizeCdnUrl(media.video_url);
+            debugLog.push(`__a=1-media:v=${!!videoUrl},i=${!!imageUrl}`);
           }
         }
       }
     } catch (e) {
-      console.warn('?__a=1 API error:', e.message);
+      debugLog.push(`__a=1-err:${e.message.substring(0, 40)}`);
     }
   }
 
-  // Step C: Direct HTML scrape
-  try {
-    const pageRes = await fetch(targetPageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1'
-      }
-    });
-
-    if (pageRes.ok) {
-      const html = await pageRes.text();
-      const unescaped = html
-        .replace(/\\u([0-9a-fA-F]{4})/g, (_, c) => String.fromCharCode(parseInt(c, 16)))
-        .replace(/\\\//g, '/')
-        .replace(/\\u0026/g, '&')
-        .replace(/&amp;/g, '&');
-
-      // Video URL extraction
-      const videoUrlJsonMatch = unescaped.match(/"video_url"\s*:\s*"(https?:[^"]+)"/i);
-      if (videoUrlJsonMatch && videoUrlJsonMatch[1]) {
-        videoUrl = sanitizeCdnUrl(videoUrlJsonMatch[1]);
-      }
-
-      if (!videoUrl) {
-        const vvMatch = unescaped.match(/"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"(https?:[^"]+)"/i);
-        if (vvMatch && vvMatch[1]) videoUrl = sanitizeCdnUrl(vvMatch[1]);
-      }
-
-      if (!videoUrl) {
-        const pbMatch = unescaped.match(/"playback_url"\s*:\s*"(https?:[^"]+)"/i);
-        if (pbMatch && pbMatch[1]) videoUrl = sanitizeCdnUrl(pbMatch[1]);
-      }
-
-      if (!videoUrl) {
-        const mp4Matches = unescaped.match(/(https?:[^\s"'<]+?\.mp4[^\s"'<]*)/gi) || [];
-        if (mp4Matches.length > 0) {
-          let candidate = mp4Matches[0];
-          for (const m of mp4Matches) {
-            if (m.includes('fbcdn') || m.includes('cdninstagram')) {
-              candidate = m;
-              break;
+  // STEP 5: Direct page scrape with multiple UAs as fallback
+  if (!videoUrl || !imageUrl) {
+    const scrapeUAs = [
+      { ua: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)', label: 'googlebot' },
+      { ua: 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36', label: 'android' },
+    ];
+    for (const attempt of scrapeUAs) {
+      if (videoUrl && imageUrl) break;
+      try {
+        const pageRes = await fetch(targetPageUrl, {
+          headers: {
+            'User-Agent': attempt.ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          }
+        });
+        debugLog.push(`scrape-${attempt.label}:${pageRes.status}`);
+        if (pageRes.ok) {
+          const html = await pageRes.text();
+          const unescaped = unescapeInstagramHtml(html);
+          if (!videoUrl) {
+            const vids = extractAllVideoUrls(unescaped);
+            if (vids.length > 0) { videoUrl = pickBestVideoUrl(vids); debugLog.push(`scrape-${attempt.label}-video:found`); }
+          }
+          if (!imageUrl) imageUrl = extractFullResImageFromJson(unescaped) || extractPostImage(unescaped);
+          if (!avatarUrl) avatarUrl = extractAuthorAvatar(unescaped);
+          if (authorName === 'instagram_creator') {
+            const am = unescaped.match(/"username"\s*:\s*"([^"]{2,30})"/i);
+            if (am && am[1]) authorName = am[1].trim();
+          }
+          if (title.startsWith('Instagram Post (')) {
+            const tm = unescaped.match(/"caption"\s*:\s*\{"text"\s*:\s*"([^"]{3,})"/i) || unescaped.match(/<title>([^<]{5,})<\/title>/i);
+            if (tm && tm[1]) title = decodeUnicodeEscapes(tm[1].replace(/\n/g, ' ').substring(0, 220));
+          }
+          if (!carouselItems.length) {
+            const extracted = extractCarouselFromEmbed(unescaped);
+            if (extracted.length > 1) {
+              carouselItems = extracted.map(function(u, i) { return { id: i + 1, type: 'photo', url: `/api/proxy-media?url=${encodeURIComponent(u)}` }; });
             }
           }
-          videoUrl = sanitizeCdnUrl(candidate);
         }
+      } catch (e) {
+        debugLog.push(`scrape-${attempt.label}-err:${e.message.substring(0, 40)}`);
       }
-
-      const jsonFullRes = extractFullResImageFromJson(unescaped);
-      if (jsonFullRes) {
-        imageUrl = jsonFullRes;
-      } else if (!imageUrl) {
-        imageUrl = extractPostImage(unescaped);
-      }
-
-      avatarUrl = extractAuthorAvatar(unescaped);
-
-      // Carousel HTML fallback
-      if (!carouselItems.length) {
-        const sidecarStart = unescaped.indexOf('"edge_sidecar_to_children"');
-        const searchIn = sidecarStart !== -1
-          ? unescaped.substring(sidecarStart, sidecarStart + 200000)
-          : unescaped;
-
-        const allDisplayUrls = [];
-        const duRe = /"display_url"\s*:\s*"(https?:[^"]+(?:cdninstagram|fbcdn)[^"]+)"/gi;
-        let dm;
-        while ((dm = duRe.exec(searchIn)) !== null) {
-          const clean = sanitizeCdnUrl(dm[1]);
-          if (clean && !allDisplayUrls.includes(clean) && !clean.includes('150x150') && !clean.includes('profile_pic')) {
-            allDisplayUrls.push(clean);
-          }
-        }
-
-        if (allDisplayUrls.length > 1) {
-          carouselItems = allDisplayUrls.map((u, i) => ({
-            id: i + 1, type: 'photo',
-            url: `/api/proxy-media?url=${encodeURIComponent(u)}`
-          }));
-        }
-      }
-
-      if (authorName === 'instagram_creator') {
-        const authorMatch = unescaped.match(/"username"\s*:\s*"([^"]+)"/i) || unescaped.match(/@([A-Za-z0-9._]+)/);
-        if (authorMatch && authorMatch[1]) authorName = authorMatch[1].trim();
-      }
-
-      if (title.startsWith('Instagram Post (')) {
-        const captionMatch = unescaped.match(/"caption"\s*:\s*\{"text"\s*:\s*"([^"]+)"/i) || unescaped.match(/<title>([^<]+)<\/title>/i);
-        if (captionMatch && captionMatch[1]) {
-          title = decodeUnicodeEscapes(captionMatch[1].replace(/\n/g, ' ').replace(/\\n/g, ' ').substring(0, 220));
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Page scrape error:', e);
-  }
-
-  // Step D: Mobile embed fallback for reels
-  if (!isPost && !videoUrl) {
-    try {
-      const embedUrl = `https://www.instagram.com/reel/${shortcode}/embed/v2/`;
-      const embedRes = await fetch(embedUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Referer': 'https://www.instagram.com/'
-        }
-      });
-      if (embedRes.ok) {
-        const embedHtml = await embedRes.text();
-        const unescapedEmbed = embedHtml
-          .replace(/\\u([0-9a-fA-F]{4})/g, (_, c) => String.fromCharCode(parseInt(c, 16)))
-          .replace(/\\\//g, '/')
-          .replace(/\\u0026/g, '&')
-          .replace(/&amp;/g, '&');
-
-        const ev1 = unescapedEmbed.match(/"video_url"\s*:\s*"(https?:[^"]+)"/i);
-        if (ev1 && ev1[1]) videoUrl = sanitizeCdnUrl(ev1[1]);
-
-        if (!videoUrl) {
-          const ev2 = unescapedEmbed.match(/"video_versions"\s*:\s*\[\s*\{[^}]*"url"\s*:\s*"(https?:[^"]+)"/i);
-          if (ev2 && ev2[1]) videoUrl = sanitizeCdnUrl(ev2[1]);
-        }
-
-        if (!videoUrl) {
-          const ev3 = unescapedEmbed.match(/(https?:[^\s"'<]+?\.mp4[^\s"'<]*)/gi) || [];
-          if (ev3.length > 0) videoUrl = sanitizeCdnUrl(ev3[0]);
-        }
-
-        if (!imageUrl) {
-          imageUrl = extractPostImage(unescapedEmbed) || extractFullResImageFromJson(unescapedEmbed);
-        }
-      }
-    } catch (e) {
-      console.warn('Embed fallback error:', e);
     }
   }
 
-  // Step D2: Embed page carousel extraction
+  // STEP 6: Post embed - carousel extraction (posts only)
   if (isPost && carouselItems.length <= 1) {
     try {
-      const postEmbedUrl = `https://www.instagram.com/p/${shortcode}/embed/`;
-      const postEmbedRes = await fetch(postEmbedUrl, {
+      const postEmbedRes = await fetch(`https://www.instagram.com/p/${shortcode}/embed/`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Referer': 'https://www.instagram.com/'
         }
       });
+      debugLog.push(`post-embed:${postEmbedRes.status}`);
       if (postEmbedRes.ok) {
         const postEmbedHtml = await postEmbedRes.text();
         const extracted = extractCarouselFromEmbed(postEmbedHtml);
         if (extracted.length > 1) {
-          carouselItems = extracted.map((u, i) => ({
-            id: i + 1,
-            type: 'photo',
-            url: `/api/proxy-media?url=${encodeURIComponent(u)}`
-          }));
+          carouselItems = extracted.map(function(u, i) { return { id: i + 1, type: 'photo', url: `/api/proxy-media?url=${encodeURIComponent(u)}` }; });
           if (!imageUrl) imageUrl = extracted[0];
         } else if (extracted.length === 1 && !imageUrl) {
           imageUrl = extracted[0];
         }
+        debugLog.push(`post-embed-carousel:${extracted.length}`);
       }
     } catch (e) {
-      console.warn('Step D2 embed carousel error:', e.message);
+      debugLog.push(`post-embed-err:${e.message.substring(0, 40)}`);
     }
   }
+
+  console.log('[extractor] shortcode=' + shortcode + ' | debug: ' + debugLog.join(' | '));
 
   return {
     success: Boolean(videoUrl || imageUrl || (carouselItems && carouselItems.length > 0)),
@@ -487,6 +486,7 @@ export async function extractInstagramMedia(url) {
     avatarUrl,
     authorName,
     title: decodeUnicodeEscapes(title),
-    carouselItems
+    carouselItems,
+    debug: debugLog
   };
 }
