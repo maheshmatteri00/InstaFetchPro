@@ -220,10 +220,10 @@ export async function extractInstagramMedia(url) {
     }
   }
 
-  // Step B.5: Instagram internal JSON API (?__a=1)
-  if (isPost && !carouselItems.length) {
+  // Step B.5: Instagram internal JSON API (?__a=1) - works for both /p/ and /reel/ URLs
+  if (!carouselItems.length) {
     try {
-      const jsonApiUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
+      const jsonApiUrl = `${targetPageUrl}?__a=1&__d=dis`;
       const jsonApiRes = await fetch(jsonApiUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
