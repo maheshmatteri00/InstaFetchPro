@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Core Instagram media extraction and proxy logic.
  * Used by Cloudflare Workers, Cloudflare Pages functions, and Vite dev server.
  */
@@ -54,46 +54,68 @@ export function extractFullResImageFromJson(html) {
     }
   }
 
+  // thumbnail_src - actual reel/video poster frame
+  const thumbSrcMatch = text.match(/"thumbnail_src"\s*:\s*"([^"]+(?:cdninstagram|fbcdn)[^"]+)"/i);
+  if (thumbSrcMatch && thumbSrcMatch[1]) {
+    const t = sanitizeCdnUrl(thumbSrcMatch[1]);
+    if (t && !t.includes('t51.2885-19') && !t.includes('profile_pic')) return t;
+  }
+
+  // display_url - skip profile pic CDN paths
   const displayUrlMatch = text.match(/"display_url"\s*:\s*"([^"]+cdninstagram[^"]+)"/i)
     || text.match(/"display_url"\s*:\s*"([^"]+fbcdn[^"]+)"/i);
   if (displayUrlMatch && displayUrlMatch[1]) {
-    return sanitizeCdnUrl(displayUrlMatch[1]);
+    const d = sanitizeCdnUrl(displayUrlMatch[1]);
+    if (d && !d.includes('t51.2885-19') && !d.includes('profile_pic')) return d;
   }
 
   return null;
 }
 
+/** Returns true if a CDN URL looks like a profile picture rather than post media. */
+function isProfilePicUrl(url) {
+  if (!url) return false;
+  const u = url.toLowerCase();
+  return u.includes('profile_pic') ||
+         u.includes('t51.2885-19') ||   // Instagram profile pic CDN segment
+         u.includes('s150x150') ||
+         u.includes('s320x320') ||
+         u.includes('s100x100') ||
+         u.includes('s50x50');
+}
+
 export function extractPostImage(html) {
   if (!html) return null;
 
-  const ogContentFirst = html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-  if (ogContentFirst && ogContentFirst[1]) return sanitizeCdnUrl(ogContentFirst[1]);
+  // og:image / twitter:image — check all 4 attribute order variants,
+  // but SKIP if the URL looks like a profile picture (embed pages often
+  // put the account avatar in og:image for reel pages)
+  const ogCandidates = [
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i),
+    html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i),
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i),
+    html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i),
+  ];
+  for (const m of ogCandidates) {
+    if (m && m[1]) {
+      const candidate = sanitizeCdnUrl(m[1]);
+      if (candidate && !isProfilePicUrl(candidate)) return candidate;
+    }
+  }
 
-  const ogPropertyFirst = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-  if (ogPropertyFirst && ogPropertyFirst[1]) return sanitizeCdnUrl(ogPropertyFirst[1]);
-
-  const twContentFirst = html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i);
-  if (twContentFirst && twContentFirst[1]) return sanitizeCdnUrl(twContentFirst[1]);
-
-  const twNameFirst = html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
-  if (twNameFirst && twNameFirst[1]) return sanitizeCdnUrl(twNameFirst[1]);
-
+  // JSON display_url / display_src — skip profile pics
   const displayUrlMatch = html.match(/"display_url"\s*:\s*"([^"]+)"/i) || html.match(/"display_src"\s*:\s*"([^"]+)"/i);
-  if (displayUrlMatch && displayUrlMatch[1]) return sanitizeCdnUrl(displayUrlMatch[1]);
+  if (displayUrlMatch && displayUrlMatch[1]) {
+    const d = sanitizeCdnUrl(displayUrlMatch[1]);
+    if (d && !isProfilePicUrl(d)) return d;
+  }
 
+  // Raw CDN image URLs — skip small/profile sizes
   const imgMatches = html.match(/(https?:[^\s"'<]+?(?:cdninstagram|fbcdn)[^\s"'<]+?\.jpg[^\s"'<]*)/gi) || [];
-  const postImgCandidate = imgMatches.find(url => {
-    const lower = url.toLowerCase();
-    return !lower.includes('150x150') &&
-           !lower.includes('320x320') &&
-           !lower.includes('_a.jpg') &&
-           !lower.includes('profile_pic') &&
-           !lower.includes('s150x150') &&
-           !lower.includes('s320x320');
-  });
+  const postImgCandidate = imgMatches.find(url => !isProfilePicUrl(url));
 
   if (postImgCandidate) return sanitizeCdnUrl(postImgCandidate);
-  return imgMatches.length > 0 ? sanitizeCdnUrl(imgMatches[0]) : null;
+  return null;  // Don't fall back to profile pic sized images
 }
 
 export function extractAuthorAvatar(html) {
@@ -271,11 +293,11 @@ export async function extractInstagramMedia(url) {
         }
 
         if (!imageUrl) {
+          // extractFullResImageFromJson first (image_versions2 / thumbnail_src / display_url)
+          // then og:image meta tags — both now filter out profile-picture URLs
           imageUrl = extractFullResImageFromJson(unescaped) || extractPostImage(unescaped);
-          if (!imageUrl) {
-            const imgTag = unescaped.match(/<img[^>]+src=["'](https?:[^"']+(?:cdninstagram|fbcdn)[^"']+)["']/i);
-            if (imgTag) imageUrl = sanitizeCdnUrl(imgTag[1]);
-          }
+          // NOTE: do NOT fall back to generic <img> tag scan — embed pages render the
+          // account profile picture as the first CDN <img>, which would give us the wrong image.
         }
 
         if (authorName === 'instagram_creator') {
